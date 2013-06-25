@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
 import hashlib
+from re import compile, match
 from optparse import OptionParser
 from time import sleep
 import os
+
 
 def file_has_md5(f, h):
 	"""
@@ -12,9 +14,13 @@ def file_has_md5(f, h):
 	"""
 	BLOCK_SIZE = 128
 	md5 = hashlib.md5()
-	fd = open(f)
 	if options.debug:
-		print("[DEBUG] file_has_md5: checking '%s' against hash '%s'" % (f, h))
+		print("[DEBUG] file_has_md5: hash '%s' file '%s'" % (h, f))
+	try:
+		fd = open(f)
+	except IOError:
+		if options.verbose:
+			print("[ERROR] file_has_md5: Can't open '%s'" % f)
 	while True:
 		data = fd.read(BLOCK_SIZE)
 		if not data:
@@ -28,10 +34,30 @@ def file_has_md5(f, h):
 		return True
 	return False
 
-def file_has_content(f, c):
+
+def file_has_regex(f, regex):
+	"""
+		Look for a matching regex inside a file, line by line,
+		and return True if found
+	"""
+	fd = open(f)
+	if options.debug:
+		print("[DEBUG] file_has_regex: checking file '%s'" % (f,))
+	try:
+		fd = open(f)
+	except IOError:
+		if options.verbose:
+			print("[ERROR] file_has_regex: Can't open '%s'" % f)
+	for line in fd:
+		if regex.match(line):
+			if options.debug:
+				print("[DEBUG] file_has_regex: match found in file '%s'" %
+					  (f,))
+			return True
 	return False
 
-usage = """%prog [options] <path>:content=<regex> <path>:md5=<hash> ...
+
+usage = """%prog [options] <path>:regex=<regex> <path>:md5=<hash> ...
 Compare the files contained in a path with a regex or a hash."""
 parser = OptionParser(usage=usage)
 parser.disable_interspersed_args()
@@ -46,7 +72,7 @@ parser.add_option("-q", "--quiet",
                   action="store_false", dest="verbose",
                   help="be vewwy quiet (I'm hunting wabbits)")
 parser.add_option("-d", "--debug",
-                  action="store_false", dest="debug", default=False,
+                  action="store_true", dest="debug", default=False,
                   help="debug logging, to impress yours friends")
 (options, args) = parser.parse_args()
 
@@ -80,13 +106,13 @@ for ioc in IOCS:
 					print("Adding file '%s' to target list for IOC '%s'" %
 						  (os.path.join(r,f), ioc))
 	elif os.path.isfile(path):
-		IOCS[ioc]['files'].append(path)
+		IOCS[ioc]['files'][path] = None
 
 for ioc in IOCS:
 	"""
 		For each file listed in each IOC, perform the check
 		according to the mode
-		'content' mode executes the regex inside the file
+		'regex' mode executes the regex inside the file
 		'md5' and 'sha1' modes calculate a hash of the file and compare it to
 		the provided hash value
 	"""
@@ -96,12 +122,14 @@ for ioc in IOCS:
 	mode = IOCS[ioc]['mode']
 	check = IOCS[ioc]['check']
 	for f in IOCS[ioc]['files']:
-		sleep(options.throttle)
+		if options.throttle > 0:
+			sleep(options.throttle)
 		if options.debug:
 			print("[DEBUG] checking '%s' against '%s' in mode '%s'" %
 				  (f, check, mode))
-		if mode == 'content':
-			IOCS[ioc]['files'][f] = file_has_content(f, check)
+		if mode == 'regex':
+			regex = compile(check)
+			IOCS[ioc]['files'][f] = file_has_regex(f, regex)
 			continue
 		if mode == 'md5':
 			IOCS[ioc]['files'][f] = file_has_md5(f, check)
