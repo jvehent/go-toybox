@@ -81,7 +81,12 @@ def store_match(f, ioc, counter):
 
 
 usage = """%prog [options] <path>:regex=<regex> <path>:md5=<hash> ...
-Compare the files contained in a path with a regex or a hash."""
+Compare the files contained in a path with a regex or a hash.
+
+example: %prog /usr/bin/vim:md5=8680f252cabb7f4752f8927ce0c6f9bd /usr/bin/vim:regex='.+frame_hdr.+'
+results: Starting check of 2495 files
+         3 results found.
+         IOC '/usr/bin/:md5=8680f252cabb7f4752f8927ce0c6f9bd' present in '['/usr/bin/rvim', ...]'"""
 parser = OptionParser(usage=usage)
 parser.disable_interspersed_args()
 parser.add_option("-o", "--output", dest="report", type="string",
