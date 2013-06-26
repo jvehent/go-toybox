@@ -116,11 +116,17 @@ for ioc in args:
 				add_file_to_checklist(f_abs, ioc, mode, check)
 	elif os.path.isfile(path):
 		add_file_to_checklist(path, ioc, mode, check)
-
+if options.verbose:
+	print("Starting check of %s files" % (len(CHECKLIST),))
+fcount = 0
 for f in CHECKLIST:
 	"""
 		Check the files listed in the CHECKLIST dict.
 	"""
+	fcount += 1
+	if fcount % 1000 == 0:
+		if options.verbose:
+			print("%s files processed" % (fcount,))
 	if 'md5' in CHECKLIST[f]['modes']:
 		h = compute_md5_of_file(f)
 		md5s = build_dict_of_checks(CHECKLIST[f]['iocs'], 'md5')
