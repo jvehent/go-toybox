@@ -1,6 +1,6 @@
 /* Look for file IOCs on the local system
- * jvehent - ulfr - 2013
- */
+   jvehent - ulfr - 2013
+*/
 package main
 import(
 	"bufio"
@@ -14,23 +14,37 @@ import(
 	"strings"
 )
 
-
-type IOC struct {
-	Raw, Path, Check, Value string
-}
-
-
-// core structure used to check each individual file and store results
-type FileCheck struct {
-	checks map[string]map[string]map[string]bool
-}
-
-
-/* ParseIOC takes a single IOC in the format <path>:<check>=<value>
-   eg. /usr/bin/vim:md5=8680f252cabb7f4752f8927ce0c6f9bd
-   return: IOC structure
+/* Representation of a File IOC.
+	* Raw is the raw IOC string received from the program arguments
+	* Path is the file system path to inspect
+	* Check is the type of check, such as md5, sha1, contains, named, ...
+	* Value is the value of the check, such as a md5 hash
+	* Result is a boolean set to True when the IOC is detected
 */
-func ParseIOC(raw_ioc string) (ioc IOC) {
+type FileIOC struct {
+	Raw, Path, Check, Value string
+	Result bool
+}
+
+
+/* FileCheck is a structure used to perform checks against a file.
+	* IOCs is an array of FileIOC
+	* Checks is an array of Check used to speed up the lookups
+*/
+type FileCheck struct {
+	IOCs []FileIOC
+}
+
+
+/* ParseIOC parses an IOC from the command line into a FileIOC struct
+   parameters:
+	* raw_ioc is a string that contains the IOC from the command line in
+	the format <path>:<check>=<value>
+	eg. /usr/bin/vim:md5=8680f252cabb7f4752f8927ce0c6f9bd
+   return:
+	* a FileIOC structure
+*/
+func ParseIOC(raw_ioc string) (ioc FileIOC) {
 	ioc.Raw = raw_ioc
 	tmp := strings.Split(raw_ioc, ":")
 	ioc.Path = tmp[0]
@@ -39,20 +53,24 @@ func ParseIOC(raw_ioc string) (ioc IOC) {
 	return
 }
 
-/* GetFilesFromPath Walks through the path recursively and test all entries,
-   when a file is found, it is added to the map with the associated IOC
-   return: nil on success, error on failure
+
+/* BuildIOCChecklist takes an FileIOC structure, and walks through the path
+   to list all the files that need to be inspected. When a file is found, it
+   store it into the checklist map, with the associated FileIOC.
+   parameters:
+	* ioc is a FileIOC that contains a path to walk through
+	* checklist is a checklist map to populate
+   returns:
+	* nil on success, error otherwise
 */
-func GetFilesFromPath(ioc IOC, files map[string]FileCheck) error {
+func BuildIOCChecklist(ioc FileIOC, checklist map[string]FileCheck) error {
 	err := filepath.Walk(ioc.Path,
 			     func(file string, f os.FileInfo, err error) error {
 				if err != nil { panic(err) }
 				if !f.IsDir() {
-					//files[file] = ioc.Check: {
-					//	ioc.Value: {
-					//		ioc.Raw: false
-					//	}
-					//}
+					var tmp = checklist[file]
+					tmp.IOCs = append(tmp.IOCs, ioc)
+					checklist[file] = tmp
 				}
 				return nil
 			     })
@@ -60,12 +78,15 @@ func GetFilesFromPath(ioc IOC, files map[string]FileCheck) error {
 	return nil
 }
 
-/* GetFileMD5 opens a file and read it by blocks of 64 bytes (512 bits)
-   update a md5 sum with each block
-   this method plays nice with large files
-   return: hex encoded MD5 hash
+/* GetFileMD5 calculates the MD5 hash of a file.
+   It opens a file, reads it by blocks of 64 bytes (512 bits), and updates a
+   md5 sum with each block. This method plays nice with big files
+   parameters:
+	* fp is a string that contains the path of a file
+   return:
+	* hexhash, the hex encoded MD5 hash of the file found at fp
 */
-func GetFileMD5(fp string) (hash string){
+func GetFileMD5(fp string) (hexhash string){
 	h := md5.New()
 	fd, err := os.Open(fp)
 	if err != nil { panic(err)}
@@ -82,21 +103,27 @@ func GetFileMD5(fp string) (hash string){
 		if block == 0 { break }
 		h.Write(buf[:block])
 	}
-	hash = fmt.Sprintf("%x", h.Sum(nil))
+	hexhash = fmt.Sprintf("%x", h.Sum(nil))
 	return
 }
 
+
 func main() {
-	iocs := make(map[string]IOC)
-	files := make(map[string]FileCheck)
+	iocs := make(map[string]FileIOC)
+	checklist := make(map[string]FileCheck)
 	flag.Parse()
 	for i := 0; flag.Arg(i) != ""; i++ {
+		fmt.Println("Parsing IOC from command line", flag.Arg(i))
 		raw_ioc := flag.Arg(i)
 		iocs[raw_ioc] = ParseIOC(raw_ioc)
-		GetFilesFromPath(iocs[raw_ioc], files)
+		if !BuildIOCChecklist(iocs[raw_ioc], checklist) {
+			panic("Failed to build the checklist for ioc",raw_ioc)
+		}
 	}
-	for ioc, I := range iocs {
-		fmt.Println(ioc, I.Path, I.Check, I.Value)
+	for f := range checklist{
+		fmt.Println(f, checklist[f])
+	}
+	for _, I := range iocs {
 		switch I.Check {
 		case "contains":
 		case "named":
