@@ -15,6 +15,7 @@ import(
 )
 
 var DEBUG bool = false
+var VERBOSE bool = true
 
 /* BitMask for the type of check to apply to a given file
    see documentation about iota for more info
@@ -33,9 +34,10 @@ const(
 /* Representation of a File IOC.
 	* Raw is the raw IOC string received from the program arguments
 	* Path is the file system path to inspect
-	* Check is the type of check, such as md5, sha1, contains, named, ...
 	* Value is the value of the check, such as a md5 hash
-	* Result is a boolean set to True when the IOC is detected
+	* Check is the type of check in integer form
+	* ResultCount is a counter of positive results for this IOC
+	* Result is a boolean set to True when the IOC has matched once or more
 */
 type FileIOC struct {
 	Raw, Path, Value	string
@@ -57,11 +59,9 @@ type IOCCheck struct {
 
 
 /* FileCheck is a structure used to perform checks against a file.
-	* IOCs is an array of FileIOC
-	* Checks is an array of unique check type used to speed up processing.
-	If a given file needs to be checks for 3 md5 IOCs, the Checks array
-	will contain ['md5'] once. The hash of the file will be computed once,
-	and them compared to all 3 hashes.
+	* IOCs a map that contains several arrays of IOCCheck. The integer key
+	of the map is a Checkmask, so that IOCCheck are sorted by type of check
+	* Checks is a bitmask of checks to perform on this file
 */
 type FileCheck struct {
 	IOCs		map[int][]IOCCheck
@@ -79,16 +79,16 @@ type FileCheck struct {
 	* a FileIOC structure
 */
 func ParseIOC(raw_ioc string, id int) (ioc FileIOC) {
-	ioc.Raw = raw_ioc
-	ioc.ID = id
+	ioc.Raw		= raw_ioc
+	ioc.ID		= id
 	// split on the first ':' and use the left part as the Path
-	tmp := strings.Split(raw_ioc, ":")
-	ioc.Path = tmp[0]
+	tmp		:= strings.Split(raw_ioc, ":")
+	ioc.Path	= tmp[0]
 	// split the right part on '=', left is the check, right is the value
-	tmp = strings.Split(tmp[1], "=")
-	ioc.Value = tmp[1]
+	tmp		= strings.Split(tmp[1], "=")
+	ioc.Value	= tmp[1]
 	// the check string is transformed into a bitmask and stored
-	checkstring := tmp[0]
+	checkstring	:= tmp[0]
 	switch checkstring {
 	case "contains":
 		ioc.Check = CheckContains
@@ -112,48 +112,52 @@ func ParseIOC(raw_ioc string, id int) (ioc FileIOC) {
 }
 
 
-/* BuildIOCChecklist takes an FileIOC structure, and walks through the path
-   to list all the files that need to be inspected. When a file is found, it
-   store it into the checklist map, with the associated FileIOC.
+/* GetFilesFromPath walks through a path and lists all the files in contains
    parameters:
-	* ioc is a FileIOC that contains a path to walk through
-	* checklist is a checklist map to populate
+	* path, a string that contains the file system path to walk through
    returns:
-	* nil on success, error otherwise
+	* Files, a string slice of files
 */
-func BuildIOCChecklist(ioc FileIOC, checklist map[string]FileCheck) error {
-	err := filepath.Walk(ioc.Path,
+func GetFilesFromPath(path string) (Files []string) {
+	err := filepath.Walk(path,
 		func(file string, f os.FileInfo, err error) error {
 			if err != nil {
-				fmt.Printf("BuildIOCChecklist: error while",
-					"accessing %s: %s\n", file, err)
+				fmt.Printf("GetFilesFromPath: error while",
+					   "accessing %s: %s\n", file, err)
 			}
 			// Compare mode and perm bits to discard non-files
 			fmode := f.Mode()
 			if fmode.IsRegular() {
-				/* We have a file. Add it to the checklist.
-				   1. grab the pointer of the file entry into chktmp.
-				   2. allocate the IOCs map if needed.
-				   3. Update the CheckMask bitmask with current check
-				   4. Allocate and populate the IOCCheck structure
-				   5. Append the IOCCheck struct to the IOCs slice
-				   6. Store the chktmp check into the checklist
-				*/
-				var chktmp = checklist[file]
-				if chktmp.IOCs == nil {
-					chktmp.IOCs = make(map[int][]IOCCheck)
-				}
-				chktmp.CheckMask |= ioc.Check
-				var ioctmp IOCCheck
-				ioctmp.ID = ioc.ID
-				ioctmp.Value = ioc.Value
-				ioctmp.Result = false
-				chktmp.IOCs[ioc.Check] = append(chktmp.IOCs[ioc.Check], ioctmp)
-				checklist[file] = chktmp
+				Files = append(Files, file)
 			}
 			return nil
 		})
 	if err != nil { panic(err) }
+	return Files
+}
+
+
+/* BuildIOCChecklist builds the IOC checklist for a given file
+   parameters:
+	* ioc is a FileIOC that contains a path to walk through
+	* checklist is a checklist map to populate
+	* file is the absolute path to a file
+   returns:
+	* nil on success, error otherwise
+*/
+func BuildIOCChecklist(	ioc FileIOC,
+			Checklist map[string]FileCheck, file string) error {
+	var ioctmp IOCCheck
+	var chktmp = Checklist[file]
+	if chktmp.IOCs == nil {
+		chktmp.IOCs = make(map[int][]IOCCheck)
+	}
+	ioctmp.ID		= ioc.ID
+	ioctmp.Value		= ioc.Value
+	ioctmp.Result		= false
+	chktmp.IOCs[ioc.Check]	= append(chktmp.IOCs[ioc.Check], ioctmp)
+	chktmp.CheckMask	|= ioc.Check
+	Checklist[file]		= chktmp
 	return nil
 }
 
@@ -161,9 +165,9 @@ func BuildIOCChecklist(ioc FileIOC, checklist map[string]FileCheck) error {
 /* GetHash is a wrapper above the hash functions
    parameters:
 	* fp is a string that contains the path of a file
-	* hash is a string with the name of the hash to calculate
+	* hash is an integer of the type of hash
    returns:
-	* hexhash is the hex encoded hash value
+	* hexhash is a string that contains the hex encoded hash value
 */
 func GetHash(fp string, hash int) (hexhash string) {
 	switch hash{
@@ -227,13 +231,12 @@ func VerifyHash(Checklist map[string]FileCheck, IOCs map[int]FileIOC,
 	IsVerified = false
 	for pos, ioc := range Checklist[Fp].IOCs[Check] {
 		if ioc.Value == HexHash {
-			IsVerified = true
-			Checklist[Fp].IOCs[Check][pos].Result = true
-			// store updated IOC results in IOCs list
-			tmpioc := IOCs[ioc.ID]
-			tmpioc.Result = true
-			tmpioc.ResultCount++
-			IOCs[ioc.ID] = tmpioc
+			IsVerified				= true
+			Checklist[Fp].IOCs[Check][pos].Result	= true
+			tmpioc					:= IOCs[ioc.ID]
+			tmpioc.Result				= true
+			tmpioc.ResultCount			+= 1
+			IOCs[ioc.ID]				= tmpioc
 		}
 	}
 	return
@@ -241,6 +244,7 @@ func VerifyHash(Checklist map[string]FileCheck, IOCs map[int]FileIOC,
 
 
 func main() {
+	if DEBUG { VERBOSE = true }
 	/* IOCs is a map of IOC received from the command line. each IOC receives
 	   an integer ID used as a reference in the map.
 	*/
@@ -268,21 +272,38 @@ func main() {
 	}
 	*/
 	Checklist := make(map[string]FileCheck)
+
+	/* Files is a map that list all the files contained in a path. It is
+	   used as a caching mechanism to reduce the number of times a path is
+	   walked through when multiple IOCs reference the same path
+	*/
+	Files := make(map[string][]string)
 	flag.Parse()
 	for i := 0; flag.Arg(i) != ""; i++ {
-		fmt.Println("Parsing IOC from command line", flag.Arg(i))
+		if VERBOSE {
+			fmt.Printf("Parsing IOC '%s'\n", flag.Arg(i))
+		}
 		raw_ioc := flag.Arg(i)
 		IOCs[i] = ParseIOC(raw_ioc, i)
-		err := BuildIOCChecklist(IOCs[i], Checklist)
-		if err != nil {
-			panic(err)
+		if Files[IOCs[i].Path] == nil {
+			Files[IOCs[i].Path] = GetFilesFromPath(IOCs[i].Path)
 		}
+		if VERBOSE {
+			fmt.Printf("Loading %d files for IOC %s\n",
+				   len(Files[IOCs[i].Path]), IOCs[i].Raw)
+		}
+		for _, file := range Files[IOCs[i].Path] {
+			err := BuildIOCChecklist(IOCs[i], Checklist, file)
+			if err != nil { panic(err) }
+		}
+	}
+	if VERBOSE {
+		fmt.Println("Checklist built. Initiating inspection")
 	}
 	if DEBUG {
 		for file, check := range Checklist {
 			fmt.Println(file, check)
 		}
-		fmt.Printf("%d files to inspect\n", len(Checklist))
 	}
 	/* Iterate through the entire checklist, and process the checks of
 	   each file
@@ -317,16 +338,18 @@ func main() {
 			fmt.Println("Contains method not implemented")
 		}
 	}
-	for _, ioc := range IOCs {
-		fmt.Printf("IOC '%s' returned %d positive match\n",
-			   ioc.Raw, ioc.ResultCount)
-	}
-	for fp, filechecks := range Checklist {
-		for _, IOCslice := range filechecks.IOCs {
-			for _, ioc := range IOCslice {
-				if ioc.Result {
-					fmt.Printf("'%s' positive to '%s'\n",
-						   fp, IOCs[ioc.ID].Raw)
+	if VERBOSE {
+		for _, ioc := range IOCs {
+			fmt.Printf("IOC '%s' returned %d positive match\n",
+				   ioc.Raw, ioc.ResultCount)
+		}
+		for fp, filechecks := range Checklist {
+			for _, IOCslice := range filechecks.IOCs {
+				for _, ioc := range IOCslice {
+					if ioc.Result {
+						fmt.Printf("'%s' positive to '%s'\n",
+							   fp, IOCs[ioc.ID].Raw)
+					}
 				}
 			}
 		}
