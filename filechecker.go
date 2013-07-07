@@ -38,33 +38,22 @@ const(
 	* Check is the type of check in integer form
 	* ResultCount is a counter of positive results for this IOC
 	* Result is a boolean set to True when the IOC has matched once or more
+	* Files is an slice of string that contains paths of matching files
 */
 type FileIOC struct {
 	Raw, Path, Value	string
 	ID, Check, ResultCount	int
 	Result			bool
+	Files			[]string
 }
 
 
-/* IOCCheck is the light version of an IOC struct used inside the checklist
-	* ID maps to a FileIOC ID
-	* Value maps to a FileIOC Value
-	* Result is a boolean set to true when this particular check matches
-*/
-type IOCCheck struct {
-	ID	int
-	Value	string
-	Result	bool
-}
-
-
-/* FileCheck is a structure used to perform checks against a file.
-	* IOCs a map that contains several arrays of IOCCheck. The integer key
-	of the map is a Checkmask, so that IOCCheck are sorted by type of check
-	* Checks is a bitmask of checks to perform on this file
+/* FileCheck is a structure used to perform checks against a file
+	* IOCs is a slice that contains the IDs of the IOCs to check.
+	* Checks is a bitmask of said checks, for fast looking
 */
 type FileCheck struct {
-	IOCs		map[int][]IOCCheck
+	IOCs		[]int
 	CheckMask	int
 }
 
@@ -147,15 +136,8 @@ func GetFilesFromPath(path string) (Files []string) {
 */
 func BuildIOCChecklist(	ioc FileIOC,
 			Checklist map[string]FileCheck, file string) error {
-	var ioctmp IOCCheck
 	var chktmp = Checklist[file]
-	if chktmp.IOCs == nil {
-		chktmp.IOCs = make(map[int][]IOCCheck)
-	}
-	ioctmp.ID		= ioc.ID
-	ioctmp.Value		= ioc.Value
-	ioctmp.Result		= false
-	chktmp.IOCs[ioc.Check]	= append(chktmp.IOCs[ioc.Check], ioctmp)
+	chktmp.IOCs		= append(chktmp.IOCs, ioc.ID)
 	chktmp.CheckMask	|= ioc.Check
 	Checklist[file]		= chktmp
 	return nil
@@ -229,14 +211,14 @@ func GetFileMD5(fp string) (hexhash string){
 func VerifyHash(Checklist map[string]FileCheck, IOCs map[int]FileIOC,
 		Fp string, HexHash string, Check int) (IsVerified bool) {
 	IsVerified = false
-	for pos, ioc := range Checklist[Fp].IOCs[Check] {
-		if ioc.Value == HexHash {
-			IsVerified				= true
-			Checklist[Fp].IOCs[Check][pos].Result	= true
-			tmpioc					:= IOCs[ioc.ID]
-			tmpioc.Result				= true
-			tmpioc.ResultCount			+= 1
-			IOCs[ioc.ID]				= tmpioc
+	for _, IOCID := range Checklist[Fp].IOCs {
+		if IOCs[IOCID].Value == HexHash {
+			IsVerified		= true
+			tmpioc			:= IOCs[IOCID]
+			tmpioc.Result		= true
+			tmpioc.ResultCount	+= 1
+			tmpioc.Files		= append(tmpioc.Files, Fp)
+			IOCs[IOCID]		= tmpioc
 		}
 	}
 	return
@@ -245,31 +227,23 @@ func VerifyHash(Checklist map[string]FileCheck, IOCs map[int]FileIOC,
 
 func main() {
 	if DEBUG { VERBOSE = true }
-	/* IOCs is a map of IOC received from the command line. each IOC receives
-	   an integer ID used as a reference in the map.
+	/* IOCs is a map of individual IOCs and associated results
+		IOCs = {
+			<id> = { <struct FileIOC> },
+			<id> = { <struct FileIOC> },
+			...
+		}
 	*/
 	IOCs := make(map[int]FileIOC)
 
-	/* Checklist is the core structure that represents IOC checks against files
-	   Each individual file path has a FileCheck structure, that contains
-	   one or more IOCCheck structure into a slices of checks.
-	   The checks are grouped by type, so that all MD5 IOCChecks on a single
-	   file will be listed inside 'Checklist[file].IOCs[CheckMD5]'
-	   (CheckMD5, and all check types, are integer constants)
-	Checklist: {
-		"<path>(string)": {
-			"CheckMask": (integer),					\
-			"IOCs": {						|
-				"<check>(integer)": [				|File
-					{	'ID': (integer),	\ IOC	|
-						'Value': (string),	| Check	|Check
-						'Result': (bool)	/ struct|
-					}					|struct
-					{ ...}					|
-				]						|
-			}							|
-		}								/
-	}
+	/* Checklist contains a map of files and associated checks.
+		Checklist = {
+			'<file>' = {	checkmask: <bitmask>,
+					IOCs: [<IocID>, ...]},
+			'<file>' = {	<struct FileCheck> },
+			'<file>' = {	<struct FileCheck> },
+			...
+		}
 	*/
 	Checklist := make(map[string]FileCheck)
 
@@ -281,7 +255,7 @@ func main() {
 	flag.Parse()
 	for i := 0; flag.Arg(i) != ""; i++ {
 		if VERBOSE {
-			fmt.Printf("Parsing IOC '%s'\n", flag.Arg(i))
+			fmt.Printf("Parsing IOC #%d '%s'\n", i, flag.Arg(i))
 		}
 		raw_ioc := flag.Arg(i)
 		IOCs[i] = ParseIOC(raw_ioc, i)
@@ -337,19 +311,16 @@ func main() {
 		if (FileCheckList.CheckMask & CheckSHA3)	!= 0 {
 			fmt.Println("Contains method not implemented")
 		}
+		// Done with this file, clean up
+		delete(Checklist, File)
 	}
 	if VERBOSE {
 		for _, ioc := range IOCs {
 			fmt.Printf("IOC '%s' returned %d positive match\n",
 				   ioc.Raw, ioc.ResultCount)
-		}
-		for fp, filechecks := range Checklist {
-			for _, IOCslice := range filechecks.IOCs {
-				for _, ioc := range IOCslice {
-					if ioc.Result {
-						fmt.Printf("'%s' positive to '%s'\n",
-							   fp, IOCs[ioc.ID].Raw)
-					}
+			if ioc.Result {
+				for _, file := range ioc.Files {
+					fmt.Printf("\t- %s\n", file)
 				}
 			}
 		}
