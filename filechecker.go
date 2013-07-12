@@ -155,10 +155,11 @@ func GetFileMD5(fp string) (hexhash string){
 
 /* VerifyHash compares a file hash with the IOCs that apply to the file
    parameters:
+	* file is the absolute filename of the file to check
+	* hash is the value of the hash being checked
+	* check is the type of check
+	* ActiveIOCIDs is a slice of int with IDs of active IOCs
 	* IOCs is a map of IOC
-	* Fp is the absolute filename of the file to check
-	* HexHash is the value of the hash being checked
-	* Check is the type of check
    returns:
 	* IsVerified: true if a match is found, false otherwise
 */
@@ -179,6 +180,18 @@ func VerifyHash(file string, hash string, check int, ActiveIOCIDs []int,
 }
 
 
+/* InspectFile is an orchestration function that runs the individual checks
+   against a particular file. It uses the CheckBitMask to select which checks
+   to run, and runs the checks in a smart way to minimize effort.
+   parameters:
+	* file is a string with the absolute path of the file that needs checking
+	* ActiveIOCIDs is a slice of integer that contains the IDs of the IOCs
+	that all files in that path and below must be checked against
+	* CheckBitMask is a bitmask of the checks types currently active
+	* IOCs is the global list of IOCs
+   returns:
+	* nil on success, error on failure
+*/
 func InspectFile(file string, ActiveIOCIDs []int, CheckBitMask int,
 		 IOCs map[int]FileIOC) (error) {
 	/* Iterate through the entire checklist, and process the checks of
@@ -214,7 +227,21 @@ func InspectFile(file string, ActiveIOCIDs []int, CheckBitMask int,
 	return nil
 }
 
-
+/* GetDownThatPath goes down a directory and build a list of Active IOCs that
+   apply to the current path. For a given directory, it calls itself for all
+   subdirectories fund, recursively walking down the pass. When it find a file,
+   it calls the inspection function, and give it the list of IOCs to inspect
+   the file with.
+   parameters:
+	* path is the file system path to inspect
+	* ActiveIOCIDs is a slice of integer that contains the IDs of the IOCs
+	that all files in that path and below must be checked against
+	* CheckBitMask is a bitmask of the checks types currently active
+	* IOCs is the global list of IOCs
+	* ToDoIOCs is a map that contains the IOCs that are not yet active
+   return:
+	* nil on success, error on error
+*/
 func GetDownThatPath(path string, ActiveIOCIDs []int, CheckBitMask int,
 		     IOCs map[int]FileIOC, ToDoIOCs map[int]FileIOC) (error) {
 	for id, ioc := range ToDoIOCs {
@@ -253,23 +280,6 @@ func GetDownThatPath(path string, ActiveIOCIDs []int, CheckBitMask int,
 	for _, dir := range SubDirs {
 		GetDownThatPath(dir, ActiveIOCIDs, CheckBitMask, IOCs, ToDoIOCs)
 	}
-	return nil
-}
-
-/* BuildIOCChecklist builds the IOC checklist for a given file
-   parameters:
-	* ioc is a FileIOC that contains a path to walk through
-	* checklist is a checklist map to populate
-	* file is the absolute path to a file
-   returns:
-	* nil on success, error otherwise
-*/
-func BuildIOCChecklist(	ioc FileIOC,
-			Checklist map[string]FileCheck, file string) error {
-	var chktmp = Checklist[file]
-	chktmp.IOCs		= append(chktmp.IOCs, ioc.ID)
-	chktmp.CheckMask	|= ioc.Check
-	Checklist[file]		= chktmp
 	return nil
 }
 
