@@ -3,6 +3,7 @@
 */
 package main
 import(
+	"bufio"
 	"code.google.com/p/go.crypto/sha3"
 	"crypto/md5"
 	"crypto/sha1"
@@ -13,7 +14,7 @@ import(
 	"hash"
 	"io"
 	"os"
-	//"regexp"
+	"regexp"
 	"strings"
 )
 
@@ -52,18 +53,15 @@ type FileIOC struct {
 	ID, Check, ResultCount	int
 	Result			bool
 	Files			[]string
+	Re			*regexp.Regexp
 }
 
-
-/* FileCheck is a structure used to perform checks against a file
-	* IOCs is a slice that contains the IDs of the IOCs to check.
-	* Checks is a bitmask of said checks, for fast looking
-*/
-type FileCheck struct {
-	IOCs		[]int
-	CheckMask	int
+type Stats struct {
+	IOCCount	int
+	FilesCount	int
+	IOCsMatch	int
+	FilesMatch	int
 }
-
 
 /* ParseIOC parses an IOC from the command line into a FileIOC struct
    parameters:
@@ -88,6 +86,8 @@ func ParseIOC(raw_ioc string, id int) (ioc FileIOC) {
 	switch checkstring {
 	case "contains":
 		ioc.Check = CheckContains
+		// compile the value into a regex
+		ioc.Re	  = regexp.MustCompile(ioc.Value)
 	case "named":
 		ioc.Check = CheckNamed
 	case "md5":
@@ -120,7 +120,7 @@ func ParseIOC(raw_ioc string, id int) (ioc FileIOC) {
    It opens a file, reads it block by block, and updates a
    sum with each block. This method plays nice with big files
    parameters:
-	* fp is a string that contains the path of a file
+	* fd is an open file descriptor that points to the file to inspect
 	* HashType is an integer that define the type of hash
    return:
 	* hexhash, the hex encoded hash of the file found at fp
@@ -150,7 +150,7 @@ func GetHash(fd *os.File, HashType int) (hexhash string){
 	case CheckSHA3_512:
 		h = sha3.NewKeccak512()
 	default:
-		err := fmt.Sprintf("Unkown hash type %d", HashType)
+		err := fmt.Sprintf("GetHash: Unkown hash type %d", HashType)
 		panic(err)
 	}
 	buf := make([]byte, 4096)
@@ -198,7 +198,7 @@ func VerifyHash(file string, hash string, check int, ActiveIOCIDs []int,
    against a particular file. It uses the CheckBitMask to select which checks
    to run, and runs the checks in a smart way to minimize effort.
    parameters:
-	* file is a string with the absolute path of the file that needs checking
+	* fd is an open file descriptor that points to the file to inspect
 	* ActiveIOCIDs is a slice of integer that contains the IDs of the IOCs
 	that all files in that path and below must be checked against
 	* CheckBitMask is a bitmask of the checks types currently active
@@ -212,19 +212,43 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	   each file
 	*/
 	if DEBUG {
-		fmt.Printf("InspectFile: %s CheckMask %d\n", fd.Name(), CheckBitMask)
+		fmt.Printf("InspectFile: '%s' hash CheckMask '%d'\n",
+			fd.Name(), CheckBitMask)
 	}
 	if (CheckBitMask & CheckContains)	!= 0 {
-		fmt.Println("Contains method not implemented")
+		// build a list of IOCs of check type 'contains'
+		var rlist []int
+		for _, id := range ActiveIOCIDs {
+			if (IOCs[id].Check & CheckContains) != 0 {
+				rlist = append(rlist, id)
+			}
+		}
+		// iterate through the file line by line and test each regex
+		scanner := bufio.NewScanner(fd)
+		for scanner.Scan() {
+			if err := scanner.Err(); err != nil { panic(err) }
+			for _, id := range rlist {
+				if IOCs[id].Re.MatchString(scanner.Text()){
+					tmpioc			:= IOCs[id]
+					tmpioc.Result		= true
+					tmpioc.ResultCount	+= 1
+					tmpioc.Files		= append(tmpioc.Files, fd.Name())
+					IOCs[id]		= tmpioc
+					fmt.Printf("InspectFile: Positive result " +
+						"found for '%s'\n", fd.Name())
+				}
+			}
+		}
 	}
 	if (CheckBitMask & CheckNamed)		!= 0 {
-		fmt.Println("Named method not implemented")
+		fmt.Println("InspectFile: 'named' method not implemented")
 	}
 	if (CheckBitMask & CheckMD5)		!= 0 {
 		hash := GetHash(fd, CheckMD5)
 		if VerifyHash(fd.Name(), hash, CheckMD5, ActiveIOCIDs, IOCs) {
 			if VERBOSE {
-				fmt.Printf("Positive result: %s\n", fd.Name())
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
 			}
 		}
 	}
@@ -232,7 +256,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 		hash := GetHash(fd, CheckSHA1)
 		if VerifyHash(fd.Name(), hash, CheckSHA1, ActiveIOCIDs, IOCs) {
 			if VERBOSE {
-				fmt.Printf("Positive result: %s\n", fd.Name())
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
 			}
 		}
 	}
@@ -240,7 +265,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 		hash := GetHash(fd, CheckSHA256)
 		if VerifyHash(fd.Name(), hash, CheckSHA256, ActiveIOCIDs, IOCs) {
 			if VERBOSE {
-				fmt.Printf("Positive result: %s\n", fd.Name())
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
 			}
 		}
 	}
@@ -248,7 +274,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 		hash := GetHash(fd, CheckSHA384)
 		if VerifyHash(fd.Name(), hash, CheckSHA384, ActiveIOCIDs, IOCs) {
 			if VERBOSE {
-				fmt.Printf("Positive result: %s\n", fd.Name())
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
 			}
 		}
 	}
@@ -256,7 +283,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 		hash := GetHash(fd, CheckSHA512)
 		if VerifyHash(fd.Name(), hash, CheckSHA512, ActiveIOCIDs, IOCs) {
 			if VERBOSE {
-				fmt.Printf("Positive result: %s\n", fd.Name())
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
 			}
 		}
 	}
@@ -264,7 +292,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 		hash := GetHash(fd, CheckSHA3_224)
 		if VerifyHash(fd.Name(), hash, CheckSHA3_224, ActiveIOCIDs, IOCs) {
 			if VERBOSE {
-				fmt.Printf("Positive result: %s\n", fd.Name())
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
 			}
 		}
 	}
@@ -272,7 +301,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 		hash := GetHash(fd, CheckSHA3_256)
 		if VerifyHash(fd.Name(), hash, CheckSHA3_256, ActiveIOCIDs, IOCs) {
 			if VERBOSE {
-				fmt.Printf("Positive result: %s\n", fd.Name())
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
 			}
 		}
 	}
@@ -280,7 +310,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 		hash := GetHash(fd, CheckSHA3_384)
 		if VerifyHash(fd.Name(), hash, CheckSHA3_384, ActiveIOCIDs, IOCs) {
 			if VERBOSE {
-				fmt.Printf("Positive result: %s\n", fd.Name())
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
 			}
 		}
 	}
@@ -288,12 +319,14 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 		hash := GetHash(fd, CheckSHA3_512)
 		if VerifyHash(fd.Name(), hash, CheckSHA3_512, ActiveIOCIDs, IOCs) {
 			if VERBOSE {
-				fmt.Printf("Positive result: %s\n", fd.Name())
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
 			}
 		}
 	}
 	return nil
 }
+
 
 /* GetDownThatPath goes down a directory and build a list of Active IOCs that
    apply to the current path. For a given directory, it calls itself for all
@@ -311,7 +344,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	* nil on success, error on error
 */
 func GetDownThatPath(path string, ActiveIOCIDs []int, CheckBitMask int,
-		     IOCs map[int]FileIOC, ToDoIOCs map[int]FileIOC) (error) {
+		IOCs map[int]FileIOC, ToDoIOCs map[int]FileIOC,
+		Statistics *Stats) (error) {
 	for id, ioc := range ToDoIOCs {
 		if ioc.Path == path {
 			/* Found a new IOC to apply to the current path, add
@@ -321,7 +355,8 @@ func GetDownThatPath(path string, ActiveIOCIDs []int, CheckBitMask int,
 			CheckBitMask |= ioc.Check
 			delete(ToDoIOCs, id)
 			if DEBUG {
-				fmt.Println("Adding IOC", id)
+				fmt.Printf("GetDownThatPath: Activating IOC " +
+					"id '%d' for path '%s'\n", id, path)
 			}
 		}
 	}
@@ -330,35 +365,43 @@ func GetDownThatPath(path string, ActiveIOCIDs []int, CheckBitMask int,
 	   put all sub-directories in the SubDirs slice, and call
 	   the inspection function for all files
 	*/
-	item, err := os.Open(path)
+	target, err := os.Open(path)
 	if err != nil { panic(err) }
-	itemMode, _ := item.Stat()
-	if itemMode.Mode().IsDir() {
-		DirContent, err := item.Readdir(-1)
+	targetMode, _ := target.Stat()
+	if targetMode.Mode().IsDir() {
+		// target is a directory, process its content
+		DirContent, err := target.Readdir(-1)
 		if err != nil { panic(err) }
+		// loop over the content of the directory
 		for _, DirEntry := range DirContent {
 			EntryFullPath := path + "/" + DirEntry.Name()
+			// this entry is a subdirectory, keep it for later
 			if DirEntry.IsDir() {
 				SubDirs = append(SubDirs, EntryFullPath)
+			// that one is a file, open it and inspect it
 			} else if DirEntry.Mode().IsRegular() {
 				Entryfd, err := os.Open(EntryFullPath)
 				if err != nil { panic(err) }
-				InspectFile(Entryfd, ActiveIOCIDs, CheckBitMask, IOCs)
+				InspectFile(Entryfd, ActiveIOCIDs,
+					CheckBitMask, IOCs)
+				Statistics.FilesCount++
 				if err := Entryfd.Close(); err != nil {
 					panic(err)
 				}
 			}
 		}
-	} else if itemMode.Mode().IsRegular() {
-		InspectFile(item, ActiveIOCIDs, CheckBitMask, IOCs)
+	} else if targetMode.Mode().IsRegular() {
+		InspectFile(target, ActiveIOCIDs, CheckBitMask, IOCs)
+		Statistics.FilesCount++
 	}
-	// close the current directory, we are done with it
-	if err := item.Close(); err != nil {
+	// close the current target, we are done with it
+	if err := target.Close(); err != nil {
 		panic(err)
 	}
-	// loop over the subdirectories recursively
+	// if we found any sub directories, go down the rabbit hole
 	for _, dir := range SubDirs {
-		GetDownThatPath(dir, ActiveIOCIDs, CheckBitMask, IOCs, ToDoIOCs)
+		GetDownThatPath(dir, ActiveIOCIDs, CheckBitMask, IOCs,
+			ToDoIOCs, Statistics)
 	}
 	return nil
 }
@@ -378,21 +421,22 @@ func main() {
 	// list of IOCs to process, remove from list when processed
 	ToDoIOCs := make(map[int]FileIOC)
 
+	var Statistics Stats
 	flag.Parse()
 	for i := 0; flag.Arg(i) != ""; i++ {
-		if VERBOSE {
-			fmt.Printf("Parsing IOC #%d '%s'\n", i, flag.Arg(i))
+		if DEBUG {
+			fmt.Printf("Main: Parsing IOC id '%d': '%s'\n",
+				i, flag.Arg(i))
 		}
 		raw_ioc := flag.Arg(i)
 		IOCs[i] = ParseIOC(raw_ioc, i)
 		ToDoIOCs[i] = IOCs[i]
-	}
-	if VERBOSE {
-		fmt.Println("Checklist built. Initiating inspection")
+		Statistics.IOCCount++
 	}
 	for id, ioc := range IOCs {
 		if DEBUG {
-			fmt.Println("Inspecting IOC", id)
+			fmt.Printf("Main: Inspecting path '%s' from IOC id " +
+				"'%d'\n", ioc.Path, id)
 		}
 		// loop through the list of IOC, and only process the IOCs that
 		// are still in the todo list
@@ -400,36 +444,25 @@ func main() {
 			continue
 		}
 		var EmptyActiveIOCs []int
-		GetDownThatPath(ioc.Path, EmptyActiveIOCs, 0, IOCs, ToDoIOCs)
+		GetDownThatPath(ioc.Path, EmptyActiveIOCs, 0, IOCs,
+			ToDoIOCs, &Statistics)
 	}
 	if VERBOSE {
 		for _, ioc := range IOCs {
-			fmt.Printf("IOC '%s' returned %d positive match\n",
+			fmt.Printf("Main: IOC '%s' returned %d positive match\n",
 				   ioc.Raw, ioc.ResultCount)
 			if ioc.Result {
 				for _, file := range ioc.Files {
 					fmt.Printf("\t- %s\n", file)
 				}
+				Statistics.IOCsMatch++
 			}
 		}
+		fmt.Printf("Tested IOCs:\t%d\n" +
+			"Tested files:\t%d\n" +
+			"IOCs Match:\t%d\n" +
+			"Files Match:\t%d\n",
+			Statistics.IOCCount, Statistics.FilesCount,
+			Statistics.IOCsMatch, Statistics.FilesMatch)
 	}
-	/*
-	fd, err := os.Open(file)
-	if err != nil { panic(err)}
-	defer func() {
-		if err := fd.Close(); err != nil {
-			panic(err)
-		}
-	}()
-	scanner := bufio.NewScanner(fd)
-	re := regexp.MustCompile("ulfr")
-	for scanner.Scan() {
-		if re.MatchString(scanner.Text()) {
-			fmt.Println(scanner.Text())
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "reading standard input:", err)
-	}
-	*/
 }
