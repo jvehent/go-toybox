@@ -4,9 +4,14 @@
 package main
 import(
 	"bufio"
+	"code.google.com/p/go.crypto/sha3"
 	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"flag"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	//"regexp"
@@ -25,8 +30,12 @@ const(
 	CheckMD5
 	CheckSHA1
 	CheckSHA256
+	CheckSHA384
 	CheckSHA512
-	CheckSHA3
+	CheckSHA3_224
+	CheckSHA3_256
+	CheckSHA3_384
+	CheckSHA3_512
 )
 
 
@@ -88,10 +97,18 @@ func ParseIOC(raw_ioc string, id int) (ioc FileIOC) {
 		ioc.Check = CheckSHA1
 	case "sha256":
 		ioc.Check = CheckSHA256
+	case "sha384":
+		ioc.Check = CheckSHA384
 	case "sha512":
 		ioc.Check = CheckSHA512
-	case "sha3":
-		ioc.Check = CheckSHA3
+	case "sha3_224":
+		ioc.Check = CheckSHA3_224
+	case "sha3_256":
+		ioc.Check = CheckSHA3_256
+	case "sha3_384":
+		ioc.Check = CheckSHA3_384
+	case "sha3_512":
+		ioc.Check = CheckSHA3_512
 	default:
 		err := fmt.Sprintf("ParseIOC: Invalid check '%s'", checkstring)
 		panic(err)
@@ -100,37 +117,43 @@ func ParseIOC(raw_ioc string, id int) (ioc FileIOC) {
 }
 
 
-/* GetHash is a wrapper above the hash functions
+/* GetHash calculates the hash of a file.
+   It opens a file, reads it block by block, and updates a
+   sum with each block. This method plays nice with big files
    parameters:
 	* fp is a string that contains the path of a file
-	* hash is an integer of the type of hash
-   returns:
-	* hexhash is a string that contains the hex encoded hash value
-*/
-func GetHash(fp string, hash int) (hexhash string) {
-	switch hash{
-	case CheckMD5:
-		hexhash = GetFileMD5(fp)
-	default:
-		fmt.Printf("GetHash: '%s' is not a valid hash name\n", hash)
-	}
-	return
-}
-
-
-/* GetFileMD5 calculates the MD5 hash of a file.
-   It opens a file, reads it by blocks of 64 bytes (512 bits), and updates a
-   md5 sum with each block. This method plays nice with big files
-   parameters:
-	* fp is a string that contains the path of a file
+	* HashType is an integer that define the type of hash
    return:
-	* hexhash, the hex encoded MD5 hash of the file found at fp
+	* hexhash, the hex encoded hash of the file found at fp
 */
-func GetFileMD5(fp string) (hexhash string){
+func GetHash(fp string, HashType int) (hexhash string){
 	if DEBUG {
 		fmt.Printf("GetFileMD5: computing hash for '%s'\n", fp)
 	}
-	h := md5.New()
+	var h hash.Hash
+	switch HashType {
+	case CheckMD5:
+		h = md5.New()
+	case CheckSHA1:
+		h = sha1.New()
+	case CheckSHA256:
+		h = sha256.New()
+	case CheckSHA384:
+		h = sha512.New384()
+	case CheckSHA512:
+		h = sha512.New()
+	case CheckSHA3_224:
+		h = sha3.NewKeccak224()
+	case CheckSHA3_256:
+		h = sha3.NewKeccak256()
+	case CheckSHA3_384:
+		h = sha3.NewKeccak384()
+	case CheckSHA3_512:
+		h = sha3.NewKeccak512()
+	default:
+		err := fmt.Sprintf("Unkown hash type %d", HashType)
+		panic(err)
+	}
 	fd, err := os.Open(fp)
 	if err != nil {
 		fmt.Printf("GetFileMD5: can't get MD5 for %s: %s", fp, err)
@@ -141,7 +164,8 @@ func GetFileMD5(fp string) (hexhash string){
 		}
 	}()
 	reader := bufio.NewReader(fd)
-	buf := make([]byte, 64)
+	// tested several fread values, and 4k gives the faster results
+	buf := make([]byte, 4096)
 	for {
 		block, err := reader.Read(buf)
 		if err != nil && err != io.EOF { panic(err) }
@@ -203,7 +227,7 @@ func InspectFile(file string, ActiveIOCIDs []int, CheckBitMask int,
 	if (CheckBitMask & CheckContains)	!= 0 {
 		fmt.Println("Contains method not implemented")
 	}
-	if (CheckBitMask & CheckNamed)	!= 0 {
+	if (CheckBitMask & CheckNamed)		!= 0 {
 		fmt.Println("Contains method not implemented")
 	}
 	if (CheckBitMask & CheckMD5)		!= 0 {
@@ -213,16 +237,52 @@ func InspectFile(file string, ActiveIOCIDs []int, CheckBitMask int,
 		}
 	}
 	if (CheckBitMask & CheckSHA1)		!= 0 {
-		fmt.Println("Contains method not implemented")
+		hash := GetHash(file, CheckSHA1)
+		if VerifyHash(file, hash, CheckSHA1, ActiveIOCIDs, IOCs) {
+			fmt.Printf("Positive result: %s\n", file)
+		}
 	}
-	if (CheckBitMask & CheckSHA256)	!= 0 {
-		fmt.Println("Contains method not implemented")
+	if (CheckBitMask & CheckSHA256)		!= 0 {
+		hash := GetHash(file, CheckSHA256)
+		if VerifyHash(file, hash, CheckSHA256, ActiveIOCIDs, IOCs) {
+			fmt.Printf("Positive result: %s\n", file)
+		}
 	}
-	if (CheckBitMask & CheckSHA512)	!= 0 {
-		fmt.Println("Contains method not implemented")
+	if (CheckBitMask & CheckSHA384)		!= 0 {
+		hash := GetHash(file, CheckSHA384)
+		if VerifyHash(file, hash, CheckSHA384, ActiveIOCIDs, IOCs) {
+			fmt.Printf("Positive result: %s\n", file)
+		}
 	}
-	if (CheckBitMask & CheckSHA3)		!= 0 {
-		fmt.Println("Contains method not implemented")
+	if (CheckBitMask & CheckSHA512)		!= 0 {
+		hash := GetHash(file, CheckSHA512)
+		if VerifyHash(file, hash, CheckSHA512, ActiveIOCIDs, IOCs) {
+			fmt.Printf("Positive result: %s\n", file)
+		}
+	}
+	if (CheckBitMask & CheckSHA3_224)	!= 0 {
+		hash := GetHash(file, CheckSHA3_224)
+		if VerifyHash(file, hash, CheckSHA3_224, ActiveIOCIDs, IOCs) {
+			fmt.Printf("Positive result: %s\n", file)
+		}
+	}
+	if (CheckBitMask & CheckSHA3_256)	!= 0 {
+		hash := GetHash(file, CheckSHA3_256)
+		if VerifyHash(file, hash, CheckSHA3_256, ActiveIOCIDs, IOCs) {
+			fmt.Printf("Positive result: %s\n", file)
+		}
+	}
+	if (CheckBitMask & CheckSHA3_384)	!= 0 {
+		hash := GetHash(file, CheckSHA3_384)
+		if VerifyHash(file, hash, CheckSHA3_384, ActiveIOCIDs, IOCs) {
+			fmt.Printf("Positive result: %s\n", file)
+		}
+	}
+	if (CheckBitMask & CheckSHA3_512)	!= 0 {
+		hash := GetHash(file, CheckSHA3_512)
+		if VerifyHash(file, hash, CheckSHA3_512, ActiveIOCIDs, IOCs) {
+			fmt.Printf("Positive result: %s\n", file)
+		}
 	}
 	return nil
 }
@@ -266,19 +326,24 @@ func GetDownThatPath(path string, ActiveIOCIDs []int, CheckBitMask int,
 		}
 	}()
 	if err != nil { panic(err) }
-	dircontent, err := cdir.Readdir(-1)
-	if err != nil { panic(err) }
-	for _, entry := range dircontent {
-		epath := path + "/" + entry.Name()
-		if entry.IsDir() {
-			SubDirs = append(SubDirs, epath)
+	cdirMode, _ := cdir.Stat()
+	if cdirMode.IsDir() {
+		dircontent, err := cdir.Readdir(-1)
+		if err != nil { panic(err) }
+		for _, entry := range dircontent {
+			epath := path + "/" + entry.Name()
+			if entry.IsDir() {
+				SubDirs = append(SubDirs, epath)
+			}
+			if entry.Mode().IsRegular() {
+				InspectFile(epath, ActiveIOCIDs, CheckBitMask, IOCs)
+			}
 		}
-		if entry.Mode().IsRegular() {
-			InspectFile(epath, ActiveIOCIDs, CheckBitMask, IOCs)
+		for _, dir := range SubDirs {
+			GetDownThatPath(dir, ActiveIOCIDs, CheckBitMask, IOCs, ToDoIOCs)
 		}
-	}
-	for _, dir := range SubDirs {
-		GetDownThatPath(dir, ActiveIOCIDs, CheckBitMask, IOCs, ToDoIOCs)
+	} else {
+		InspectFile(path, ActiveIOCIDs, CheckBitMask, IOCs)
 	}
 	return nil
 }
