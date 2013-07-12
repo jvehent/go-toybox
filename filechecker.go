@@ -9,7 +9,6 @@ import(
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	//"regexp"
 	"strings"
 )
@@ -101,49 +100,6 @@ func ParseIOC(raw_ioc string, id int) (ioc FileIOC) {
 }
 
 
-/* GetFilesFromPath walks through a path and lists all the files in contains
-   parameters:
-	* path, a string that contains the file system path to walk through
-   returns:
-	* Files, a string slice of files
-*/
-func GetFilesFromPath(path string) (Files []string) {
-	err := filepath.Walk(path,
-		func(file string, f os.FileInfo, err error) error {
-			if err != nil {
-				fmt.Printf("GetFilesFromPath: error while",
-					   "accessing %s: %s\n", file, err)
-			}
-			// Compare mode and perm bits to discard non-files
-			fmode := f.Mode()
-			if fmode.IsRegular() {
-				Files = append(Files, file)
-			}
-			return nil
-		})
-	if err != nil { panic(err) }
-	return Files
-}
-
-
-/* BuildIOCChecklist builds the IOC checklist for a given file
-   parameters:
-	* ioc is a FileIOC that contains a path to walk through
-	* checklist is a checklist map to populate
-	* file is the absolute path to a file
-   returns:
-	* nil on success, error otherwise
-*/
-func BuildIOCChecklist(	ioc FileIOC,
-			Checklist map[string]FileCheck, file string) error {
-	var chktmp = Checklist[file]
-	chktmp.IOCs		= append(chktmp.IOCs, ioc.ID)
-	chktmp.CheckMask	|= ioc.Check
-	Checklist[file]		= chktmp
-	return nil
-}
-
-
 /* GetHash is a wrapper above the hash functions
    parameters:
 	* fp is a string that contains the path of a file
@@ -177,7 +133,7 @@ func GetFileMD5(fp string) (hexhash string){
 	h := md5.New()
 	fd, err := os.Open(fp)
 	if err != nil {
-		fmt.Printf("GetFileMD5: can get MD5 for %s: %s", fp, err)
+		fmt.Printf("GetFileMD5: can't get MD5 for %s: %s", fp, err)
 	}
 	defer func() {
 		if err := fd.Close(); err != nil {
@@ -199,8 +155,6 @@ func GetFileMD5(fp string) (hexhash string){
 
 /* VerifyHash compares a file hash with the IOCs that apply to the file
    parameters:
-	* Checklist is the global Checklist map. The map will be updated in
-	  memory if a check is found.
 	* IOCs is a map of IOC
 	* Fp is the absolute filename of the file to check
 	* HexHash is the value of the hash being checked
@@ -208,20 +162,115 @@ func GetFileMD5(fp string) (hexhash string){
    returns:
 	* IsVerified: true if a match is found, false otherwise
 */
-func VerifyHash(Checklist map[string]FileCheck, IOCs map[int]FileIOC,
-		Fp string, HexHash string, Check int) (IsVerified bool) {
+func VerifyHash(file string, hash string, check int, ActiveIOCIDs []int,
+		IOCs map[int]FileIOC) (IsVerified bool) {
 	IsVerified = false
-	for _, IOCID := range Checklist[Fp].IOCs {
-		if IOCs[IOCID].Value == HexHash {
+	for _, id := range ActiveIOCIDs {
+		if IOCs[id].Value == hash {
 			IsVerified		= true
-			tmpioc			:= IOCs[IOCID]
+			tmpioc			:= IOCs[id]
 			tmpioc.Result		= true
 			tmpioc.ResultCount	+= 1
-			tmpioc.Files		= append(tmpioc.Files, Fp)
-			IOCs[IOCID]		= tmpioc
+			tmpioc.Files		= append(tmpioc.Files, file)
+			IOCs[id]		= tmpioc
 		}
 	}
 	return
+}
+
+
+func InspectFile(file string, ActiveIOCIDs []int, CheckBitMask int,
+		 IOCs map[int]FileIOC) (error) {
+	/* Iterate through the entire checklist, and process the checks of
+	   each file
+	*/
+	if DEBUG {
+		fmt.Printf("InspectFile: %s CheckMask %d\n", file, CheckBitMask)
+	}
+	if (CheckBitMask & CheckContains)	!= 0 {
+		fmt.Println("Contains method not implemented")
+	}
+	if (CheckBitMask & CheckNamed)	!= 0 {
+		fmt.Println("Contains method not implemented")
+	}
+	if (CheckBitMask & CheckMD5)		!= 0 {
+		hash := GetHash(file, CheckMD5)
+		if VerifyHash(file, hash, CheckMD5, ActiveIOCIDs, IOCs) {
+			fmt.Printf("Positive result: %s\n", file)
+		}
+	}
+	if (CheckBitMask & CheckSHA1)		!= 0 {
+		fmt.Println("Contains method not implemented")
+	}
+	if (CheckBitMask & CheckSHA256)	!= 0 {
+		fmt.Println("Contains method not implemented")
+	}
+	if (CheckBitMask & CheckSHA512)	!= 0 {
+		fmt.Println("Contains method not implemented")
+	}
+	if (CheckBitMask & CheckSHA3)		!= 0 {
+		fmt.Println("Contains method not implemented")
+	}
+	return nil
+}
+
+
+func GetDownThatPath(path string, ActiveIOCIDs []int, CheckBitMask int,
+		     IOCs map[int]FileIOC, ToDoIOCs map[int]FileIOC) (error) {
+	for id, ioc := range ToDoIOCs {
+		if ioc.Path == path {
+			/* Found a new IOC to apply to the current path, add
+			   it to the active list, and delete it from the todo
+			*/
+			ActiveIOCIDs = append(ActiveIOCIDs, id)
+			CheckBitMask |= ioc.Check
+			delete(ToDoIOCs, id)
+		}
+	}
+	var SubDirs []string
+	/* Non-recursive directory walk-through. Read the content of dir stored
+	   in 'path', put all sub-directories in the SubDirs slice, and call
+	   the inspection function for all files
+	*/
+	cdir, err := os.Open(path)
+	defer func() {
+		if err := cdir.Close(); err != nil {
+			panic(err)
+		}
+	}()
+	if err != nil { panic(err) }
+	dircontent, err := cdir.Readdir(-1)
+	if err != nil { panic(err) }
+	for _, entry := range dircontent {
+		epath := path + "/" + entry.Name()
+		if entry.IsDir() {
+			SubDirs = append(SubDirs, epath)
+		}
+		if entry.Mode().IsRegular() {
+			InspectFile(epath, ActiveIOCIDs, CheckBitMask, IOCs)
+		}
+	}
+	for _, dir := range SubDirs {
+		GetDownThatPath(dir, ActiveIOCIDs, CheckBitMask, IOCs, ToDoIOCs)
+	}
+	return nil
+}
+
+/* BuildIOCChecklist builds the IOC checklist for a given file
+   parameters:
+	* ioc is a FileIOC that contains a path to walk through
+	* checklist is a checklist map to populate
+	* file is the absolute path to a file
+   returns:
+	* nil on success, error otherwise
+*/
+func BuildIOCChecklist(	ioc FileIOC,
+			Checklist map[string]FileCheck, file string) error {
+	var chktmp = Checklist[file]
+	chktmp.IOCs		= append(chktmp.IOCs, ioc.ID)
+	chktmp.CheckMask	|= ioc.Check
+	Checklist[file]		= chktmp
+	return nil
 }
 
 
@@ -236,22 +285,9 @@ func main() {
 	*/
 	IOCs := make(map[int]FileIOC)
 
-	/* Checklist contains a map of files and associated checks.
-		Checklist = {
-			'<file>' = {	checkmask: <bitmask>,
-					IOCs: [<IocID>, ...]},
-			'<file>' = {	<struct FileCheck> },
-			'<file>' = {	<struct FileCheck> },
-			...
-		}
-	*/
-	Checklist := make(map[string]FileCheck)
+	// list of IOCs to process, remove from list when processed
+	ToDoIOCs := make(map[int]FileIOC)
 
-	/* Files is a map that list all the files contained in a path. It is
-	   used as a caching mechanism to reduce the number of times a path is
-	   walked through when multiple IOCs reference the same path
-	*/
-	Files := make(map[string][]string)
 	flag.Parse()
 	for i := 0; flag.Arg(i) != ""; i++ {
 		if VERBOSE {
@@ -259,60 +295,19 @@ func main() {
 		}
 		raw_ioc := flag.Arg(i)
 		IOCs[i] = ParseIOC(raw_ioc, i)
-		if Files[IOCs[i].Path] == nil {
-			Files[IOCs[i].Path] = GetFilesFromPath(IOCs[i].Path)
-		}
-		if VERBOSE {
-			fmt.Printf("Loading %d files for IOC %s\n",
-				   len(Files[IOCs[i].Path]), IOCs[i].Raw)
-		}
-		for _, file := range Files[IOCs[i].Path] {
-			err := BuildIOCChecklist(IOCs[i], Checklist, file)
-			if err != nil { panic(err) }
-		}
+		ToDoIOCs[i] = IOCs[i]
 	}
 	if VERBOSE {
 		fmt.Println("Checklist built. Initiating inspection")
 	}
-	if DEBUG {
-		for file, check := range Checklist {
-			fmt.Println(file, check)
+	for id, ioc := range IOCs {
+		// loop through the list of IOC, and only process the IOCs that
+		// are still in the todo list
+		if _, ok := ToDoIOCs[id]; !ok {
+			continue
 		}
-	}
-	/* Iterate through the entire checklist, and process the checks of
-	   each file
-	*/
-	for File, FileCheckList := range Checklist {
-		if DEBUG {
-			fmt.Printf("%s CheckMask %d\n", File,
-				   FileCheckList.CheckMask)
-		}
-		if (FileCheckList.CheckMask & CheckContains)	!= 0 {
-			fmt.Println("Contains method not implemented")
-		}
-		if (FileCheckList.CheckMask & CheckNamed)	!= 0 {
-			fmt.Println("Contains method not implemented")
-		}
-		if (FileCheckList.CheckMask & CheckMD5)		!= 0 {
-			FileHash := GetHash(File, CheckMD5)
-			if VerifyHash(Checklist, IOCs, File, FileHash, CheckMD5) {
-				fmt.Printf("Positive result: %s\n", File)
-			}
-		}
-		if (FileCheckList.CheckMask & CheckSHA1)	!= 0 {
-			fmt.Println("Contains method not implemented")
-		}
-		if (FileCheckList.CheckMask & CheckSHA256)	!= 0 {
-			fmt.Println("Contains method not implemented")
-		}
-		if (FileCheckList.CheckMask & CheckSHA512)	!= 0 {
-			fmt.Println("Contains method not implemented")
-		}
-		if (FileCheckList.CheckMask & CheckSHA3)	!= 0 {
-			fmt.Println("Contains method not implemented")
-		}
-		// Done with this file, clean up
-		delete(Checklist, File)
+		var EmptyActiveIOCs []int
+		GetDownThatPath(ioc.Path, EmptyActiveIOCs, 0, IOCs, ToDoIOCs)
 	}
 	if VERBOSE {
 		for _, ioc := range IOCs {
