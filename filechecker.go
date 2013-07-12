@@ -3,7 +3,6 @@
 */
 package main
 import(
-	"bufio"
 	"code.google.com/p/go.crypto/sha3"
 	"crypto/md5"
 	"crypto/sha1"
@@ -18,8 +17,8 @@ import(
 	"strings"
 )
 
-var DEBUG bool = false
-var VERBOSE bool = true
+var DEBUG bool		= false
+var VERBOSE bool	= true
 
 /* BitMask for the type of check to apply to a given file
    see documentation about iota for more info
@@ -126,9 +125,9 @@ func ParseIOC(raw_ioc string, id int) (ioc FileIOC) {
    return:
 	* hexhash, the hex encoded hash of the file found at fp
 */
-func GetHash(fp string, HashType int) (hexhash string){
+func GetHash(fd *os.File, HashType int) (hexhash string){
 	if DEBUG {
-		fmt.Printf("GetFileMD5: computing hash for '%s'\n", fp)
+		fmt.Printf("GetHash: computing hash for '%s'\n", fd.Name())
 	}
 	var h hash.Hash
 	switch HashType {
@@ -154,23 +153,14 @@ func GetHash(fp string, HashType int) (hexhash string){
 		err := fmt.Sprintf("Unkown hash type %d", HashType)
 		panic(err)
 	}
-	fd, err := os.Open(fp)
-	if err != nil {
-		fmt.Printf("GetFileMD5: can't get MD5 for %s: %s", fp, err)
-	}
-	defer func() {
-		if err := fd.Close(); err != nil {
-			panic(err)
-		}
-	}()
-	reader := bufio.NewReader(fd)
-	// tested several fread values, and 4k gives the faster results
 	buf := make([]byte, 4096)
+	var offset int64 = 0
 	for {
-		block, err := reader.Read(buf)
+		block, err := fd.ReadAt(buf, offset)
 		if err != nil && err != io.EOF { panic(err) }
 		if block == 0 { break }
 		h.Write(buf[:block])
+		offset += int64(block)
 	}
 	hexhash = fmt.Sprintf("%x", h.Sum(nil))
 	return
@@ -216,72 +206,90 @@ func VerifyHash(file string, hash string, check int, ActiveIOCIDs []int,
    returns:
 	* nil on success, error on failure
 */
-func InspectFile(file string, ActiveIOCIDs []int, CheckBitMask int,
+func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 		 IOCs map[int]FileIOC) (error) {
 	/* Iterate through the entire checklist, and process the checks of
 	   each file
 	*/
 	if DEBUG {
-		fmt.Printf("InspectFile: %s CheckMask %d\n", file, CheckBitMask)
+		fmt.Printf("InspectFile: %s CheckMask %d\n", fd.Name(), CheckBitMask)
 	}
 	if (CheckBitMask & CheckContains)	!= 0 {
 		fmt.Println("Contains method not implemented")
 	}
 	if (CheckBitMask & CheckNamed)		!= 0 {
-		fmt.Println("Contains method not implemented")
+		fmt.Println("Named method not implemented")
 	}
 	if (CheckBitMask & CheckMD5)		!= 0 {
-		hash := GetHash(file, CheckMD5)
-		if VerifyHash(file, hash, CheckMD5, ActiveIOCIDs, IOCs) {
-			fmt.Printf("Positive result: %s\n", file)
+		hash := GetHash(fd, CheckMD5)
+		if VerifyHash(fd.Name(), hash, CheckMD5, ActiveIOCIDs, IOCs) {
+			if VERBOSE {
+				fmt.Printf("Positive result: %s\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckSHA1)		!= 0 {
-		hash := GetHash(file, CheckSHA1)
-		if VerifyHash(file, hash, CheckSHA1, ActiveIOCIDs, IOCs) {
-			fmt.Printf("Positive result: %s\n", file)
+		hash := GetHash(fd, CheckSHA1)
+		if VerifyHash(fd.Name(), hash, CheckSHA1, ActiveIOCIDs, IOCs) {
+			if VERBOSE {
+				fmt.Printf("Positive result: %s\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckSHA256)		!= 0 {
-		hash := GetHash(file, CheckSHA256)
-		if VerifyHash(file, hash, CheckSHA256, ActiveIOCIDs, IOCs) {
-			fmt.Printf("Positive result: %s\n", file)
+		hash := GetHash(fd, CheckSHA256)
+		if VerifyHash(fd.Name(), hash, CheckSHA256, ActiveIOCIDs, IOCs) {
+			if VERBOSE {
+				fmt.Printf("Positive result: %s\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckSHA384)		!= 0 {
-		hash := GetHash(file, CheckSHA384)
-		if VerifyHash(file, hash, CheckSHA384, ActiveIOCIDs, IOCs) {
-			fmt.Printf("Positive result: %s\n", file)
+		hash := GetHash(fd, CheckSHA384)
+		if VerifyHash(fd.Name(), hash, CheckSHA384, ActiveIOCIDs, IOCs) {
+			if VERBOSE {
+				fmt.Printf("Positive result: %s\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckSHA512)		!= 0 {
-		hash := GetHash(file, CheckSHA512)
-		if VerifyHash(file, hash, CheckSHA512, ActiveIOCIDs, IOCs) {
-			fmt.Printf("Positive result: %s\n", file)
+		hash := GetHash(fd, CheckSHA512)
+		if VerifyHash(fd.Name(), hash, CheckSHA512, ActiveIOCIDs, IOCs) {
+			if VERBOSE {
+				fmt.Printf("Positive result: %s\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckSHA3_224)	!= 0 {
-		hash := GetHash(file, CheckSHA3_224)
-		if VerifyHash(file, hash, CheckSHA3_224, ActiveIOCIDs, IOCs) {
-			fmt.Printf("Positive result: %s\n", file)
+		hash := GetHash(fd, CheckSHA3_224)
+		if VerifyHash(fd.Name(), hash, CheckSHA3_224, ActiveIOCIDs, IOCs) {
+			if VERBOSE {
+				fmt.Printf("Positive result: %s\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckSHA3_256)	!= 0 {
-		hash := GetHash(file, CheckSHA3_256)
-		if VerifyHash(file, hash, CheckSHA3_256, ActiveIOCIDs, IOCs) {
-			fmt.Printf("Positive result: %s\n", file)
+		hash := GetHash(fd, CheckSHA3_256)
+		if VerifyHash(fd.Name(), hash, CheckSHA3_256, ActiveIOCIDs, IOCs) {
+			if VERBOSE {
+				fmt.Printf("Positive result: %s\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckSHA3_384)	!= 0 {
-		hash := GetHash(file, CheckSHA3_384)
-		if VerifyHash(file, hash, CheckSHA3_384, ActiveIOCIDs, IOCs) {
-			fmt.Printf("Positive result: %s\n", file)
+		hash := GetHash(fd, CheckSHA3_384)
+		if VerifyHash(fd.Name(), hash, CheckSHA3_384, ActiveIOCIDs, IOCs) {
+			if VERBOSE {
+				fmt.Printf("Positive result: %s\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckSHA3_512)	!= 0 {
-		hash := GetHash(file, CheckSHA3_512)
-		if VerifyHash(file, hash, CheckSHA3_512, ActiveIOCIDs, IOCs) {
-			fmt.Printf("Positive result: %s\n", file)
+		hash := GetHash(fd, CheckSHA3_512)
+		if VerifyHash(fd.Name(), hash, CheckSHA3_512, ActiveIOCIDs, IOCs) {
+			if VERBOSE {
+				fmt.Printf("Positive result: %s\n", fd.Name())
+			}
 		}
 	}
 	return nil
@@ -312,38 +320,45 @@ func GetDownThatPath(path string, ActiveIOCIDs []int, CheckBitMask int,
 			ActiveIOCIDs = append(ActiveIOCIDs, id)
 			CheckBitMask |= ioc.Check
 			delete(ToDoIOCs, id)
+			if DEBUG {
+				fmt.Println("Adding IOC", id)
+			}
 		}
 	}
 	var SubDirs []string
-	/* Non-recursive directory walk-through. Read the content of dir stored
-	   in 'path', put all sub-directories in the SubDirs slice, and call
+	/* Read the content of dir stored in 'path',
+	   put all sub-directories in the SubDirs slice, and call
 	   the inspection function for all files
 	*/
-	cdir, err := os.Open(path)
-	defer func() {
-		if err := cdir.Close(); err != nil {
-			panic(err)
-		}
-	}()
+	item, err := os.Open(path)
 	if err != nil { panic(err) }
-	cdirMode, _ := cdir.Stat()
-	if cdirMode.IsDir() {
-		dircontent, err := cdir.Readdir(-1)
+	itemMode, _ := item.Stat()
+	if itemMode.Mode().IsDir() {
+		DirContent, err := item.Readdir(-1)
 		if err != nil { panic(err) }
-		for _, entry := range dircontent {
-			epath := path + "/" + entry.Name()
-			if entry.IsDir() {
-				SubDirs = append(SubDirs, epath)
-			}
-			if entry.Mode().IsRegular() {
-				InspectFile(epath, ActiveIOCIDs, CheckBitMask, IOCs)
+		for _, DirEntry := range DirContent {
+			EntryFullPath := path + "/" + DirEntry.Name()
+			if DirEntry.IsDir() {
+				SubDirs = append(SubDirs, EntryFullPath)
+			} else if DirEntry.Mode().IsRegular() {
+				Entryfd, err := os.Open(EntryFullPath)
+				if err != nil { panic(err) }
+				InspectFile(Entryfd, ActiveIOCIDs, CheckBitMask, IOCs)
+				if err := Entryfd.Close(); err != nil {
+					panic(err)
+				}
 			}
 		}
-		for _, dir := range SubDirs {
-			GetDownThatPath(dir, ActiveIOCIDs, CheckBitMask, IOCs, ToDoIOCs)
-		}
-	} else {
-		InspectFile(path, ActiveIOCIDs, CheckBitMask, IOCs)
+	} else if itemMode.Mode().IsRegular() {
+		InspectFile(item, ActiveIOCIDs, CheckBitMask, IOCs)
+	}
+	// close the current directory, we are done with it
+	if err := item.Close(); err != nil {
+		panic(err)
+	}
+	// loop over the subdirectories recursively
+	for _, dir := range SubDirs {
+		GetDownThatPath(dir, ActiveIOCIDs, CheckBitMask, IOCs, ToDoIOCs)
 	}
 	return nil
 }
@@ -376,6 +391,9 @@ func main() {
 		fmt.Println("Checklist built. Initiating inspection")
 	}
 	for id, ioc := range IOCs {
+		if DEBUG {
+			fmt.Println("Inspecting IOC", id)
+		}
 		// loop through the list of IOC, and only process the IOCs that
 		// are still in the todo list
 		if _, ok := ToDoIOCs[id]; !ok {
