@@ -52,7 +52,7 @@ import (
 )
 
 var DEBUG bool = false
-var VERBOSE bool = true
+var VERBOSE bool = false
 
 /* BitMask for the type of check to apply to a given file
    see documentation about iota for more info
@@ -332,8 +332,10 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 			}
 		}
 		if MatchRegexpsOnFile(fd, ReList, IOCs) {
-			fmt.Printf("InspectFile: Positive result found for "+
-				"'%s'\n", fd.Name())
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckNamed) != 0 {
@@ -345,15 +347,17 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 			}
 		}
 		if MatchRegexpsOnName(fd.Name(), ReList, IOCs) {
-			fmt.Printf("InspectFile: Positive result found for "+
-				"'%s'\n", fd.Name())
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
+					"found for '%s'\n", fd.Name())
+			}
 		}
 	}
 	if (CheckBitMask & CheckMD5) != 0 {
 		hash := GetHash(fd, CheckMD5)
 		if VerifyHash(fd.Name(), hash, CheckMD5, ActiveIOCIDs, IOCs) {
-			if VERBOSE {
-				fmt.Printf("InspectFile: Positive result "+
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
 					"found for '%s'\n", fd.Name())
 			}
 		}
@@ -361,8 +365,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	if (CheckBitMask & CheckSHA1) != 0 {
 		hash := GetHash(fd, CheckSHA1)
 		if VerifyHash(fd.Name(), hash, CheckSHA1, ActiveIOCIDs, IOCs) {
-			if VERBOSE {
-				fmt.Printf("InspectFile: Positive result "+
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
 					"found for '%s'\n", fd.Name())
 			}
 		}
@@ -370,8 +374,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	if (CheckBitMask & CheckSHA256) != 0 {
 		hash := GetHash(fd, CheckSHA256)
 		if VerifyHash(fd.Name(), hash, CheckSHA256, ActiveIOCIDs, IOCs) {
-			if VERBOSE {
-				fmt.Printf("InspectFile: Positive result "+
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
 					"found for '%s'\n", fd.Name())
 			}
 		}
@@ -379,8 +383,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	if (CheckBitMask & CheckSHA384) != 0 {
 		hash := GetHash(fd, CheckSHA384)
 		if VerifyHash(fd.Name(), hash, CheckSHA384, ActiveIOCIDs, IOCs) {
-			if VERBOSE {
-				fmt.Printf("InspectFile: Positive result "+
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
 					"found for '%s'\n", fd.Name())
 			}
 		}
@@ -388,8 +392,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	if (CheckBitMask & CheckSHA512) != 0 {
 		hash := GetHash(fd, CheckSHA512)
 		if VerifyHash(fd.Name(), hash, CheckSHA512, ActiveIOCIDs, IOCs) {
-			if VERBOSE {
-				fmt.Printf("InspectFile: Positive result "+
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
 					"found for '%s'\n", fd.Name())
 			}
 		}
@@ -397,8 +401,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	if (CheckBitMask & CheckSHA3_224) != 0 {
 		hash := GetHash(fd, CheckSHA3_224)
 		if VerifyHash(fd.Name(), hash, CheckSHA3_224, ActiveIOCIDs, IOCs) {
-			if VERBOSE {
-				fmt.Printf("InspectFile: Positive result "+
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
 					"found for '%s'\n", fd.Name())
 			}
 		}
@@ -406,8 +410,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	if (CheckBitMask & CheckSHA3_256) != 0 {
 		hash := GetHash(fd, CheckSHA3_256)
 		if VerifyHash(fd.Name(), hash, CheckSHA3_256, ActiveIOCIDs, IOCs) {
-			if VERBOSE {
-				fmt.Printf("InspectFile: Positive result "+
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
 					"found for '%s'\n", fd.Name())
 			}
 		}
@@ -415,8 +419,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	if (CheckBitMask & CheckSHA3_384) != 0 {
 		hash := GetHash(fd, CheckSHA3_384)
 		if VerifyHash(fd.Name(), hash, CheckSHA3_384, ActiveIOCIDs, IOCs) {
-			if VERBOSE {
-				fmt.Printf("InspectFile: Positive result "+
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
 					"found for '%s'\n", fd.Name())
 			}
 		}
@@ -424,8 +428,8 @@ func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
 	if (CheckBitMask & CheckSHA3_512) != 0 {
 		hash := GetHash(fd, CheckSHA3_512)
 		if VerifyHash(fd.Name(), hash, CheckSHA3_512, ActiveIOCIDs, IOCs) {
-			if VERBOSE {
-				fmt.Printf("InspectFile: Positive result "+
+			if DEBUG{
+				fmt.Printf("InspectFile: Positive result " +
 					"found for '%s'\n", fd.Name())
 			}
 		}
@@ -559,7 +563,6 @@ func BuildResults(IOCs map[int]FileIOC, Statistics *Stats) error {
 	}
 	JsonResults += fmt.Sprintf("]\n")
 	if VERBOSE {
-		fmt.Println(JsonResults)
 		fmt.Printf("Tested IOCs:\t%d\n"+
 			"Tested files:\t%d\n"+
 			"IOCs Match:\t%d\n"+
@@ -569,6 +572,7 @@ func BuildResults(IOCs map[int]FileIOC, Statistics *Stats) error {
 			Statistics.IOCsMatch, Statistics.UniqueFiles,
 			Statistics.TotalHits)
 	}
+	fmt.Println(JsonResults)
 	return nil
 }
 
