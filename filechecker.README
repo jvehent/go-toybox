@@ -1,0 +1,146 @@
+Filechecker is a program that looks for files with specific signatures, content or names. It is designed to efficiently process a large number of checks on the file system, with as little memory and CPU as possible.
+
+
+Normal usage
+------------
+
+	# ./filechecker /usr/bin/vim:md5=cf0431eb562482ebfe9a5663fdcc4e35 /usr/bin/vim:md5=cf0431eb5  /home/ulfr/Documents/:named=julien-gravatar.png /etc/passwd:contains=^\(ulfr\|root\) /etc:named=^/etc/passwd$ /etc/shadow:sha512=6cebb128421a0737f9a4564d987cbf51878c5e132c82da06174f9bdc1d999c48661f7843740a01ca51c255d334befc43246f77ba790b03a936ab150068262172
+
+	InspectFile: Positive result found for '/home/ulfr/Documents//julien-gravatar.png'
+	InspectFile: Positive result found for '/etc/passwd'
+	InspectFile: Positive result found for '/etc/passwd'
+	InspectFile: Positive result found for '/etc/shadow'
+	Main: IOC '/usr/bin/vim:md5=cf0431eb562482ebfe9a5663fdcc4e35' returned 0 positive match
+	Main: IOC '/usr/bin/vim:md5=cf0431eb5' returned 0 positive match
+	Main: IOC '/home/ulfr/Documents/:named=julien-gravatar.png' returned 1 positive match
+		- 1 hits on /home/ulfr/Documents//julien-gravatar.png
+	Main: IOC '/etc/passwd:contains=^(ulfr|root)' returned 2 positive match
+		- 2 hits on /etc/passwd
+	Main: IOC '/etc:named=^/etc/passwd$' returned 1 positive match
+		- 1 hits on /etc/passwd
+	Main: IOC '/etc/shadow:sha512=6cebb128421a0737f9a4564d987cbf51878c5e132c82da06174f9bdc1d999c48661f7843740a01ca51c255d334befc43246f77ba790b03a936ab150068262172' returned 1 positive match
+		- 1 hits on /etc/shadow
+	[
+	    {
+		"Raw": "/usr/bin/vim:md5=cf0431eb562482ebfe9a5663fdcc4e35",
+		"Path": "/usr/bin/vim",
+		"Value": "cf0431eb562482ebfe9a5663fdcc4e35",
+		"ID": 0,
+		"Check": 4,
+		"ResultCount": 0,
+		"Result": false,
+		"Files": {},
+		"Re": null
+	    },
+	    {
+		"Raw": "/usr/bin/vim:md5=cf0431eb5",
+		"Path": "/usr/bin/vim",
+		"Value": "cf0431eb5",
+		"ID": 1,
+		"Check": 4,
+		"ResultCount": 0,
+		"Result": false,
+		"Files": {},
+		"Re": null
+	    },
+	    {
+		"Raw": "/home/ulfr/Documents/:named=julien-gravatar.png",
+		"Path": "/home/ulfr/Documents/",
+		"Value": "julien-gravatar.png",
+		"ID": 2,
+		"Check": 2,
+		"ResultCount": 1,
+		"Result": true,
+		"Files": {
+		    "/home/ulfr/Documents//julien-gravatar.png": 1
+		},
+		"Re": {}
+	    },
+	    {
+		"Raw": "/etc/passwd:contains=^(ulfr|root)",
+		"Path": "/etc/passwd",
+		"Value": "^(ulfr|root)",
+		"ID": 3,
+		"Check": 1,
+		"ResultCount": 2,
+		"Result": true,
+		"Files": {
+		    "/etc/passwd": 2
+		},
+		"Re": {}
+	    },
+	    {
+		"Raw": "/etc:named=^/etc/passwd$",
+		"Path": "/etc",
+		"Value": "^/etc/passwd$",
+		"ID": 4,
+		"Check": 2,
+		"ResultCount": 1,
+		"Result": true,
+		"Files": {
+		    "/etc/passwd": 1
+		},
+		"Re": {}
+	    },
+	    {
+		"Raw": "/etc/shadow:sha512=6cebb128421a0737f9a4564d987cbf51878c5e132c82da06174f9bdc1d999c48661f7843740a01ca51c255d334befc43246f77ba790b03a936ab150068262172",
+		"Path": "/etc/shadow",
+		"Value": "6cebb128421a0737f9a4564d987cbf51878c5e132c82da06174f9bdc1d999c48661f7843740a01ca51c255d334befc43246f77ba790b03a936ab150068262172",
+		"ID": 5,
+		"Check": 64,
+		"ResultCount": 1,
+		"Result": true,
+		"Files": {
+		    "/etc/shadow": 1
+		},
+		"Re": null
+	    }
+	]
+
+	Tested IOCs:	6
+	Tested files:	3255
+	IOCs Match:	4
+	Unique Files:	4
+	Total hits:	5
+
+
+Performance test
+-----------------
+
+1. Single MD5 search on the entire /usr (10MB ram, 1335 files/second)
+
+	# time ./filechecker /usr/:md5=cf0431eb562482ebfe9a5663fdcc4e35
+	Main: IOC '/usr/:md5=cf0431eb562482ebfe9a5663fdcc4e35' returned 0 positive match
+	[
+	    {
+		"Raw": "/usr/:md5=cf0431eb562482ebfe9a5663fdcc4e35",
+		"Path": "/usr/",
+		"Value": "cf0431eb562482ebfe9a5663fdcc4e35",
+		"ID": 0,
+		"Check": 4,
+		"ResultCount": 0,
+		"Result": false,
+		"Files": {},
+		"Re": null
+	    }
+	]
+
+	Tested IOCs:	1
+	Tested files:	210937
+	IOCs Match:	0
+	Unique Files:	0
+	Total hits:	0
+
+	real	2m38.742s
+	user	1m2.368s
+	sys	0m34.689s
+
+	VmRSS:	   10060 kB
+
+2. 20,000 MD5s, each pointing to a specific file
+
+	time ./filechecker $(cat 20000md5s.txt ) > /dev/null
+
+	real	6m35.398s
+	user	6m26.594s
+	sys	0m6.165s
