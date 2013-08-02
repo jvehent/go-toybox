@@ -76,16 +76,22 @@ const (
 - Path is the file system path to inspect
 - Value is the value of the check, such as a md5 hash
 - Check is the type of check in integer form
+- FilesCount is the total number of files inspected for each IOC
 - ResultCount is a counter of positive results for this IOC
 - Result is a boolean set to True when the IOC has matched once or more
 - Files is an slice of string that contains paths of matching files
 */
 type FileIOC struct {
-	Raw, Path, Value       string
-	ID, Check, ResultCount int
-	Result                 bool
-	Files                  map[string]int
-	Re                     *regexp.Regexp
+	Raw, Path, Value			string
+	ID, Check, FilesCount, ResultCount	int
+	Result					bool
+	Files					map[string]int
+	Re					*regexp.Regexp
+}
+
+type IOCResult struct {
+	TestedFiles, ResultCount int
+	Files			 []string
 }
 
 /* Statistic counters:
@@ -227,14 +233,16 @@ func VerifyHash(file string, hash string, check int, ActiveIOCIDs []int,
 	IOCs map[int]FileIOC) (IsVerified bool) {
 	IsVerified = false
 	for _, id := range ActiveIOCIDs {
+		tmpioc := IOCs[id]
 		if IOCs[id].Value == hash {
 			IsVerified = true
-			tmpioc := IOCs[id]
 			tmpioc.Result = true
 			tmpioc.ResultCount += 1
 			tmpioc.Files[file] = 1
-			IOCs[id] = tmpioc
 		}
+		// update IOCs tested files count
+		tmpioc.FilesCount++
+		IOCs[id] = tmpioc
 	}
 	return
 }
@@ -275,6 +283,12 @@ func MatchRegexpsOnFile(fd *os.File, ReList []int,
 			IOCs[id] = tmpioc
 		}
 	}
+	// update IOCs tested files count
+	for _, id := range ReList {
+		tmpioc := IOCs[id]
+		tmpioc.FilesCount++
+		IOCs[id] = tmpioc
+	}
 	return
 }
 
@@ -290,14 +304,16 @@ func MatchRegexpsOnName(filename string, ReList []int,
 	IOCs map[int]FileIOC) (MatchesRegexp bool) {
 	MatchesRegexp = false
 	for _, id := range ReList {
+		tmpioc := IOCs[id]
 		if IOCs[id].Re.MatchString(filename) {
 			MatchesRegexp = true
-			tmpioc := IOCs[id]
 			tmpioc.Result = true
 			tmpioc.ResultCount++
 			tmpioc.Files[filename] = 1
-			IOCs[id] = tmpioc
 		}
+		// update IOCs tested files count
+		tmpioc.FilesCount++
+		IOCs[id] = tmpioc
 	}
 	return
 }
@@ -315,7 +331,7 @@ func MatchRegexpsOnName(filename string, ReList []int,
 	- nil on success, error on failure
 */
 func InspectFile(fd *os.File, ActiveIOCIDs []int, CheckBitMask int,
-	IOCs map[int]FileIOC) error {
+	         IOCs map[int]FileIOC) error {
 	/* Iterate through the entire checklist, and process the checks of
 	   each file
 	*/
@@ -531,37 +547,36 @@ func GetDownThatPath(path string, ActiveIOCIDs []int, CheckBitMask int,
 	- nil on success, error on failure
 */
 func BuildResults(IOCs map[int]FileIOC, Statistics *Stats) error {
-	JsonResults := "[\n"
+	Results := make(map[string]IOCResult)
 	FileHistory := make(map[string]int)
-	for i, ioc := range IOCs {
+	for _, ioc := range IOCs {
 		if VERBOSE {
 			fmt.Printf("Main: IOC '%s' returned %d positive match\n",
 				ioc.Raw, ioc.ResultCount)
-		}
-		if ioc.Result {
-			for file, hits := range ioc.Files {
-				if VERBOSE {
-					fmt.Printf("\t- %d hits on %s\n",
-						hits, file)
+			if ioc.Result {
+				for file, hits := range ioc.Files {
+					if VERBOSE {
+						fmt.Printf("\t- %d hits on %s\n",
+							hits, file)
+					}
+					Statistics.TotalHits += hits
+					if _, ok := FileHistory[file]; !ok {
+						Statistics.UniqueFiles++
+					}
 				}
-				Statistics.TotalHits += hits
-				if _, ok := FileHistory[file]; !ok {
-					Statistics.UniqueFiles++
-				}
+				Statistics.IOCsMatch++
 			}
-			Statistics.IOCsMatch++
 		}
-		b, err := json.MarshalIndent(ioc, "    ", "    ")
-		if err != nil {
-			panic(err)
+		var listPosFiles []string
+		for f, _ := range ioc.Files {
+			listPosFiles = append(listPosFiles, f)
 		}
-		JsonResults += fmt.Sprintf("    %s", b)
-		if i < len(IOCs)-1 {
-			JsonResults += ","
+		Results[ioc.Raw] = IOCResult{
+			TestedFiles: ioc.FilesCount,
+			ResultCount: ioc.ResultCount,
+			Files: listPosFiles,
 		}
-		JsonResults += "\n"
 	}
-	JsonResults += fmt.Sprintf("]\n")
 	if VERBOSE {
 		fmt.Printf("Tested IOCs:\t%d\n"+
 			"Tested files:\t%d\n"+
@@ -572,7 +587,9 @@ func BuildResults(IOCs map[int]FileIOC, Statistics *Stats) error {
 			Statistics.IOCsMatch, Statistics.UniqueFiles,
 			Statistics.TotalHits)
 	}
-	fmt.Println(JsonResults)
+	JsonResults, err := json.Marshal(Results)
+	if err != nil { panic(err) }
+	os.Stdout.Write(JsonResults)
 	return nil
 }
 
