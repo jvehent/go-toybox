@@ -24,7 +24,7 @@ func main() {
 		`version=123 AND (name=bob OR (name=alice AND version=234)) AND heartbeattime>last{5m} AND actionid=5`,
 		`(name=alice OR (name=bob OR (name=eve AND version=1) AND version=2) AND version=3)`,
 		`version=123 AND (name=alice OR (name=bob OR (name=eve AND version=1) AND version=2) AND version=3)`,
-		`name=bob OR name=alice OR heartbeattime>last{10m} AND (name=eve AND version=123) OR (name=zob AND heartbeattime>last{5m}) AND actionid=456`,
+		`(name=bob OR name=alice OR heartbeattime>last{10m}) AND ((name=eve AND version=123) OR (name=zob AND heartbeattime>last{5m}) AND actionid=456)`,
 	}
 	for _, search := range searches {
 		search = strings.ToUpper(search)
