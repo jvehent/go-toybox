@@ -31,10 +31,11 @@ func main() {
 		`/var/log/boot*`,
 		`/var/cache/*/saved*`,
 		`/etc/cron.*/*`,
-		`/usr/*/vim`,
+		`/usr/*bin/vim`,
+		`/usr/*bin/*tables`,
 		`/sbin/*tables`,
+		`/etc/yum.repos.d/*`,
 	}
-
 	for _, pattern := range patterns {
 		// find the root path before the first pattern character.
 		// seppos records the position of the latest path separator
@@ -105,7 +106,6 @@ func walkDir(root, pattern string) (err error) {
 		if match {
 			fmt.Printf("File '%s' matches pattern '%s'\n", filename, pattern)
 		}
-
 	}
 	dir.Close()
 	return
