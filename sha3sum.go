@@ -3,52 +3,45 @@
 */
 package main
 
-import(
+import (
 	"bufio"
-	"code.google.com/p/go.crypto/sha3"
-	"flag"
 	"fmt"
 	"io"
 	"os"
+
+	"golang.org/x/crypto/sha3"
 )
 
-var DEBUG bool = false
-var VERBOSE bool = true
-
-func GetFileSHA3(fp string) (hexhash string){
-	if DEBUG {
-		fmt.Printf("GetFileMD5: computing hash for '%s'\n", fp)
+func main() {
+	if len(os.Args) != 2 {
+		panic("usage: " + os.Args[0] + " <file>")
 	}
-	h := sha3.NewKeccak512()
-	fd, err := os.Open(fp)
+	fmt.Fprintf(os.Stderr, "computing sha3 hashes for '%s'\n", os.Args[1])
+	h224 := sha3.New224()
+	h256 := sha3.New256()
+	h384 := sha3.New384()
+	h512 := sha3.New512()
+	fd, err := os.Open(os.Args[1])
 	if err != nil {
-		fmt.Printf("GetFileMD5: can't get MD5 for %s: %s", fp, err)
+		panic(err)
 	}
-	defer func() {
-		if err := fd.Close(); err != nil {
-			panic(err)
-		}
-	}()
 	reader := bufio.NewReader(fd)
 	buf := make([]byte, 4096)
 	for {
 		block, err := reader.Read(buf)
-		if err != nil && err != io.EOF { panic(err) }
-		if block == 0 { break }
-		h.Write(buf[:block])
-	}
-	hexhash = fmt.Sprintf("%x %s", h.Sum(nil), fp)
-	return
-}
-
-func main() {
-	if DEBUG { VERBOSE = true }
-
-	flag.Parse()
-	for i := 0; flag.Arg(i) != ""; i++ {
-		if VERBOSE {
-			fmt.Printf("using path'%s'\n", flag.Arg(i))
+		if err != nil && err != io.EOF {
+			panic(err)
 		}
-		fmt.Println(GetFileSHA3(flag.Arg(i)))
+		if block == 0 {
+			break
+		}
+		h224.Write(buf[:block])
+		h256.Write(buf[:block])
+		h384.Write(buf[:block])
+		h512.Write(buf[:block])
 	}
+	fmt.Printf("sha224: %x %s\n", h224.Sum(nil), os.Args[1])
+	fmt.Printf("sha256: %x %s\n", h256.Sum(nil), os.Args[1])
+	fmt.Printf("sha384: %x %s\n", h384.Sum(nil), os.Args[1])
+	fmt.Printf("sha512: %x %s\n", h512.Sum(nil), os.Args[1])
 }
